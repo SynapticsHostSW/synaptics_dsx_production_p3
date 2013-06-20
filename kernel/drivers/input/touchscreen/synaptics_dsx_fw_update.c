@@ -231,7 +231,6 @@ struct synaptics_rmi4_fwu_handle {
 	enum bl_version bl_version;
 	bool initialized;
 	bool program_enabled;
-	bool unlocked;
 	bool has_perm_config;
 	bool has_bl_config;
 	bool has_disp_config;
@@ -437,9 +436,6 @@ static int fwu_read_f34_queries(void)
 				__func__);
 		return retval;
 	}
-
-	if (fwu->flash_properties & UNLOCKED)
-		fwu->unlocked = 1;
 
 	count = 4;
 
@@ -1259,6 +1255,24 @@ static int fwu_do_lockdown(void)
 	if (retval < 0)
 		return retval;
 
+	retval = fwu->fn_ptr->read(fwu->rmi4_data,
+			fwu->f34_fd.query_base_addr + fwu->properties_off,
+			&fwu->flash_properties,
+			sizeof(fwu->flash_properties));
+	if (retval < 0) {
+		dev_err(&fwu->rmi4_data->i2c_client->dev,
+				"%s: Failed to read flash properties\n",
+				__func__);
+		return retval;
+	}
+
+	if ((fwu->flash_properties & UNLOCKED) == 0) {
+		dev_info(&fwu->rmi4_data->i2c_client->dev,
+				"%s: Device already locked down\n",
+				__func__);
+		return retval;
+	}
+
 	retval = fwu_write_lockdown();
 	if (retval < 0)
 		return retval;
@@ -1325,11 +1339,7 @@ static int fwu_start_reflash(void)
 		goto exit;
 	}
 
-	if (fwu->do_lockdown && !fwu->unlocked) {
-		dev_info(&fwu->rmi4_data->i2c_client->dev,
-				"%s: Device already locked down\n",
-				__func__);
-	} else if (fwu->do_lockdown && fwu->unlocked) {
+	if (fwu->do_lockdown) {
 		switch (fwu->bl_version) {
 		case V5:
 		case V6:
