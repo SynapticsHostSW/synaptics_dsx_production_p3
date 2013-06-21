@@ -235,6 +235,7 @@ struct synaptics_rmi4_fwu_handle {
 	bool has_bl_config;
 	bool has_disp_config;
 	bool force_update;
+	bool in_flash_prog_mode;
 	bool do_lockdown;
 	unsigned int data_pos;
 	unsigned int image_size;
@@ -603,24 +604,14 @@ static enum flash_area fwu_go_nogo(struct image_header_data *header)
 	unsigned long image_fw_id;
 	char *strptr;
 	char *firmware_id;
-	struct f01_device_status f01_device_status;
 
 	if (fwu->force_update) {
 		flash_area = UI_FIRMWARE;
 		goto exit;
 	}
 
-	retval = fwu_read_f01_device_status(&f01_device_status);
-	if (retval < 0) {
-		flash_area = NONE;
-		goto exit;
-	}
-
 	/* Update both UI and config if device is in bootloader mode */
-	if (f01_device_status.flash_prog) {
-		dev_info(&fwu->rmi4_data->i2c_client->dev,
-				"%s: In flash prog mode\n",
-				__func__);
+	if (fwu->in_flash_prog_mode) {
 		flash_area = UI_FIRMWARE;
 		goto exit;
 	}
@@ -1288,6 +1279,7 @@ static int fwu_start_reflash(void)
 	enum flash_area flash_area;
 	unsigned short f01_cmd_base_addr;
 	struct image_header_data header;
+	struct f01_device_status f01_device_status;
 	const unsigned char *fw_image;
 	const struct firmware *fw_entry = NULL;
 
@@ -1337,6 +1329,19 @@ static int fwu_start_reflash(void)
 				__func__);
 		retval = -EINVAL;
 		goto exit;
+	}
+
+	retval = fwu_read_f01_device_status(&f01_device_status);
+	if (retval < 0)
+		goto exit;
+
+	if (f01_device_status.flash_prog) {
+		dev_info(&fwu->rmi4_data->i2c_client->dev,
+				"%s: In flash prog mode\n",
+				__func__);
+		fwu->in_flash_prog_mode = true;
+	} else {
+		fwu->in_flash_prog_mode = false;
 	}
 
 	if (fwu->do_lockdown) {
