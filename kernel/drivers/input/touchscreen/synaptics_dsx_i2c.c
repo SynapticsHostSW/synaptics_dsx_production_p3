@@ -137,6 +137,12 @@ static ssize_t synaptics_rmi4_0dbutton_store(struct device *dev,
 static ssize_t synaptics_rmi4_suspend_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count);
 
+static ssize_t synaptics_rmi4_gesture_show(struct device *dev,
+		struct device_attribute *attr, char *buf);
+
+static ssize_t synaptics_rmi4_gesture_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count);
+
 struct synaptics_rmi4_f01_device_status {
 	union {
 		struct {
@@ -370,7 +376,12 @@ static struct device_attribute attrs[] = {
 	__ATTR(suspend, S_IWUGO,
 			synaptics_rmi4_show_error,
 			synaptics_rmi4_suspend_store),
+	__ATTR(gesture, (S_IRUGO | S_IWUGO),
+			synaptics_rmi4_gesture_show,
+			synaptics_rmi4_gesture_store),
 };
+
+static int gesture;
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static ssize_t synaptics_rmi4_full_pm_cycle_show(struct device *dev,
@@ -540,6 +551,31 @@ static ssize_t synaptics_rmi4_suspend_store(struct device *dev,
 		synaptics_rmi4_suspend(dev);
 	else if (input == 0)
 		synaptics_rmi4_resume(dev);
+	else
+		return -EINVAL;
+
+	return count;
+}
+
+static ssize_t synaptics_rmi4_gesture_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+			gesture);
+}
+
+static ssize_t synaptics_rmi4_gesture_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned int input;
+
+	if (sscanf(buf, "%u", &input) != 1)
+		return -EINVAL;
+
+	if (input == 1)
+		gesture = 1;
+	else if (input == 0)
+		gesture = 0;
 	else
 		return -EINVAL;
 
@@ -1215,6 +1251,12 @@ static void synaptics_rmi4_sensor_report(struct synaptics_rmi4_data *rmi4_data)
 					"%s: Failed to reinit device\n",
 					__func__);
 		}
+		return;
+	}
+
+	if (rmi4_data->in_suspend) {
+		rmi4_data->in_suspend = false;
+		gesture = 1;
 		return;
 	}
 
@@ -2948,11 +2990,13 @@ static void synaptics_rmi4_early_suspend(struct early_suspend *h)
 		rmi4_data->staying_awake = false;
 	}
 
+	rmi4_data->in_suspend = true;
+/*
 	rmi4_data->touch_stopped = true;
 	synaptics_rmi4_irq_enable(rmi4_data, false);
 	synaptics_rmi4_sensor_sleep(rmi4_data);
 	synaptics_rmi4_free_fingers(rmi4_data);
-
+*/
 	if (rmi4_data->full_pm_cycle)
 		synaptics_rmi4_suspend(&(rmi4_data->input_dev->dev));
 
