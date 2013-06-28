@@ -274,6 +274,21 @@ struct synaptics_rmi4_f12_finger_data {
 #endif
 };
 
+struct synaptics_rmi4_pen_data {
+	unsigned char status_pen:1;
+	unsigned char status_invert:1;
+	unsigned char status_barrel:1;
+	unsigned char status_reserved:5;
+	unsigned char x_lsb;
+	unsigned char x_msb;
+	unsigned char y_lsb;
+	unsigned char y_msb;
+#ifdef ACTIVE_PEN_16BIT_PRESSURE
+	unsigned char pressure_lsb;
+#endif
+	unsigned char pressure_msb;
+};
+
 struct synaptics_rmi4_f1a_query {
 	union {
 		struct {
@@ -707,6 +722,120 @@ exit:
 	return retval;
 }
 
+static int synaptics_rmi4_pen_report(struct synaptics_rmi4_data *rmi4_data,
+		struct synaptics_rmi4_fn *fhandler)
+{
+	int retval;
+	int x;
+	int y;
+	unsigned short data_addr;
+	struct synaptics_rmi4_pen_data *pen_data;
+	struct synaptics_rmi4_f12_extra_data *extra_data;
+	static bool pen_active = false;
+
+	data_addr = fhandler->full_addr.data_base;
+	extra_data = (struct synaptics_rmi4_f12_extra_data *)fhandler->extra;
+	pen_data = extra_data->pen_data;
+
+	retval = synaptics_rmi4_i2c_read(rmi4_data,
+			data_addr + extra_data->data6_offset,
+			(unsigned char *)extra_data->pen_data,
+			sizeof(*pen_data));
+	if (retval < 0)
+		return 0;
+
+	if (pen_data->status_pen == 0) {
+		if (pen_active) {
+			pen_active = false;
+#ifdef TYPE_B_PROTOCOL
+			input_mt_slot(rmi4_data->input_dev, 0);
+			input_mt_report_slot_state(rmi4_data->input_dev,
+					MT_TOOL_PEN, 0);
+#endif
+			input_report_key(rmi4_data->input_dev,
+					BTN_TOUCH, 0);
+			input_report_key(rmi4_data->input_dev,
+					BTN_TOOL_PEN, 0);
+			input_report_key(rmi4_data->input_dev,
+					BTN_TOOL_RUBBER, 0);
+#ifndef TYPE_B_PROTOCOL
+			input_mt_sync(rmi4_data->input_dev);
+#endif
+			input_sync(rmi4_data->input_dev);
+		}
+
+		dev_dbg(&rmi4_data->i2c_client->dev,
+				"%s: No active pen data\n",
+				__func__);
+
+		return 0;
+	}
+
+	x = (pen_data->x_msb << 8) | (pen_data->x_lsb);
+	y = (pen_data->y_msb << 8) | (pen_data->y_lsb);
+
+	if ((x == -1) && (y == -1)) {
+		dev_dbg(&rmi4_data->i2c_client->dev,
+				"%s: Active pen in range but no valid x & y\n",
+				__func__);
+		return 1;
+	}
+
+	if (!pen_active)
+		synaptics_rmi4_free_fingers(rmi4_data);
+
+	pen_active = true;
+
+#ifdef TYPE_B_PROTOCOL
+	input_mt_slot(rmi4_data->input_dev, 0);
+	input_mt_report_slot_state(rmi4_data->input_dev,
+			MT_TOOL_PEN, 1);
+#endif
+
+	if (pen_data->pressure_msb) {
+		input_report_key(rmi4_data->input_dev,
+				BTN_TOUCH, 1);
+	} else {
+		input_report_key(rmi4_data->input_dev,
+				BTN_TOUCH, 0);
+	}
+
+	if (pen_data->status_invert) {
+		input_report_key(rmi4_data->input_dev,
+				BTN_TOOL_RUBBER, 1);
+	} else {
+		input_report_key(rmi4_data->input_dev,
+				BTN_TOOL_PEN, 1);
+	}
+
+	input_report_abs(rmi4_data->input_dev,
+			ABS_MT_POSITION_X, x);
+	input_report_abs(rmi4_data->input_dev,
+			ABS_MT_POSITION_Y, y);
+
+#ifndef TYPE_B_PROTOCOL
+	input_mt_sync(rmi4_data->input_dev);
+#endif
+
+	input_sync(rmi4_data->input_dev);
+
+	dev_dbg(&rmi4_data->i2c_client->dev,
+			"%s: Active pen:\n"
+			"status = %d\n"
+			"invert = %d\n"
+			"barrel = %d\n"
+			"x = %d\n"
+			"y = %d\n"
+			"pressure = %d\n",
+			__func__,
+			pen_data->status_pen,
+			pen_data->status_invert,
+			pen_data->status_barrel,
+			x, y, pen_data->pressure_msb);
+
+	return 1;
+}
+
  /**
  * synaptics_rmi4_f11_abs_report()
  *
@@ -890,6 +1019,12 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 	data_addr = fhandler->full_addr.data_base;
 	extra_data = (struct synaptics_rmi4_f12_extra_data *)fhandler->extra;
 	size_of_2d_data = sizeof(struct synaptics_rmi4_f12_finger_data);
+
+	if (rmi4_data->active_pen) {
+		touch_count = synaptics_rmi4_pen_report(rmi4_data, fhandler);
+		if (touch_count)
+			return touch_count;
+	}
 
 	/* Determine the total number of fingers to process */
 	if (extra_data->data15_size) {
@@ -1422,6 +1557,22 @@ static int synaptics_rmi4_f12_set_enables(struct synaptics_rmi4_data *rmi4_data,
 	return retval;
 }
 
+static void synaptics_rmi4_f12_kfree(struct synaptics_rmi4_data *rmi4_data,
+		struct synaptics_rmi4_fn *fhandler)
+{
+	struct synaptics_rmi4_f12_extra_data *extra_data;
+
+	extra_data = (struct synaptics_rmi4_f12_extra_data *)fhandler->extra;
+
+	if (rmi4_data->active_pen)
+		kfree(extra_data->pen_data);
+
+	kfree(fhandler->extra);
+	kfree(fhandler->data);
+
+	return;
+}
+
  /**
  * synaptics_rmi4_f12_init()
  *
@@ -1447,6 +1598,7 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 	unsigned char ctrl_23_offset;
 	unsigned char ctrl_28_offset;
 	unsigned char num_of_fingers;
+	struct synaptics_rmi4_pen_data *pen_data;
 	struct synaptics_rmi4_f12_extra_data *extra_data;
 	struct synaptics_rmi4_f12_query_5 query_5;
 	struct synaptics_rmi4_f12_query_8 query_8;
@@ -1529,6 +1681,19 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 
 	/* Determine the presence of the Data0 register */
 	extra_data->data1_offset = query_8.data0_is_present;
+
+	if ((size_of_query8 >= 2) && (query_8.data6_is_present)) {
+		rmi4_data->active_pen = true;
+		extra_data->data6_offset = query_8.data0_is_present +
+				query_8.data1_is_present +
+				query_8.data2_is_present +
+				query_8.data3_is_present +
+				query_8.data4_is_present +
+				query_8.data5_is_present;
+		extra_data->pen_data = kmalloc(sizeof(*pen_data), GFP_KERNEL);
+	} else {
+		rmi4_data->active_pen = false;
+	}
 
 	if ((size_of_query8 >= 3) && (query_8.data15_is_present)) {
 		extra_data->data15_offset = query_8.data0_is_present +
@@ -2191,6 +2356,10 @@ static int synaptics_rmi4_set_input_dev(struct synaptics_rmi4_data *rmi4_data)
 	set_bit(EV_ABS, rmi4_data->input_dev->evbit);
 	set_bit(BTN_TOUCH, rmi4_data->input_dev->keybit);
 	set_bit(BTN_TOOL_FINGER, rmi4_data->input_dev->keybit);
+	if (rmi4_data->active_pen) {
+		set_bit(BTN_TOOL_PEN, rmi4_data->input_dev->keybit);
+		set_bit(BTN_TOOL_RUBBER, rmi4_data->input_dev->keybit);
+	}
 #ifdef INPUT_PROP_DIRECT
 	set_bit(INPUT_PROP_DIRECT, rmi4_data->input_dev->propbit);
 #endif
@@ -2254,7 +2423,9 @@ err_register_input:
 err_query_device:
 	if (!list_empty(&rmi->support_fn_list)) {
 		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
+			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
+				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
+			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
 				synaptics_rmi4_f1a_kfree(fhandler);
 			} else {
 				kfree(fhandler->extra);
@@ -2376,7 +2547,9 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 
 	if (!list_empty(&rmi->support_fn_list)) {
 		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
+			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
+				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
+			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
 				synaptics_rmi4_f1a_kfree(fhandler);
 			} else {
 				kfree(fhandler->extra);
@@ -2626,6 +2799,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	rmi4_data->sensor_sleep = false;
 	rmi4_data->irq_enabled = false;
 	rmi4_data->fingers_on_2d = false;
+	rmi4_data->active_pen = false;
 
 	rmi4_data->i2c_read = synaptics_rmi4_i2c_read;
 	rmi4_data->i2c_write = synaptics_rmi4_i2c_write;
@@ -2736,7 +2910,9 @@ err_gpio_reset:
 err_gpio_attn:
 	if (!list_empty(&rmi->support_fn_list)) {
 		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
+			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
+				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
+			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
 				synaptics_rmi4_f1a_kfree(fhandler);
 			} else {
 				kfree(fhandler->extra);
@@ -2810,7 +2986,9 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 
 	if (!list_empty(&rmi->support_fn_list)) {
 		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
+			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
+				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
+			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
 				synaptics_rmi4_f1a_kfree(fhandler);
 			} else {
 				kfree(fhandler->extra);

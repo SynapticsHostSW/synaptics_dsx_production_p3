@@ -109,9 +109,11 @@ struct synaptics_rmi4_fn_full_addr {
 
 struct synaptics_rmi4_f12_extra_data {
 	unsigned char data1_offset;
+	unsigned char data6_offset;
 	unsigned char data15_offset;
 	unsigned char data15_size;
 	unsigned char data15_data[(F12_FINGERS_TO_SUPPORT + 7) / 8];
+	void *pen_data;
 };
 
 /*
@@ -234,6 +236,7 @@ struct synaptics_rmi4_data {
 	bool sensor_sleep;
 	bool stay_awake;
 	bool staying_awake;
+	bool active_pen;
 	int (*i2c_read)(struct synaptics_rmi4_data *pdata, unsigned short addr,
 			unsigned char *data, unsigned short length);
 	int (*i2c_write)(struct synaptics_rmi4_data *pdata, unsigned short addr,
