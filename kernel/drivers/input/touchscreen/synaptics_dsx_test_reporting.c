@@ -1354,8 +1354,6 @@ static struct bin_attribute dev_report_data = {
 static struct synaptics_rmi4_f54_handle *f54;
 static struct synaptics_rmi4_f55_handle *f55;
 
-DECLARE_COMPLETION(f54_remove_complete);
-
 static bool is_report_type_valid(enum f54_report_types report_type)
 {
 	switch (report_type) {
@@ -3331,35 +3329,17 @@ static void synaptics_rmi4_f54_remove(struct synaptics_rmi4_data *rmi4_data)
 	f54 = NULL;
 
 exit:
-	complete(&f54_remove_complete);
-
 	return;
 }
 
-static int __init rmi4_f54_module_init(void)
+int dsx_test_reporting_module_register(void)
 {
-	synaptics_rmi4_new_function(RMI_F54, true,
+	int retval;
+
+	retval = synaptics_rmi4_new_function(RMI_F54,
 			synaptics_rmi4_f54_init,
 			synaptics_rmi4_f54_remove,
 			synaptics_rmi4_f54_attn);
 
-	return 0;
+	return retval;
 }
-
-static void __exit rmi4_f54_module_exit(void)
-{
-	synaptics_rmi4_new_function(RMI_F54, false,
-			synaptics_rmi4_f54_init,
-			synaptics_rmi4_f54_remove,
-			synaptics_rmi4_f54_attn);
-
-	wait_for_completion(&f54_remove_complete);
-	return;
-}
-
-module_init(rmi4_f54_module_init);
-module_exit(rmi4_f54_module_exit);
-
-MODULE_AUTHOR("Synaptics, Inc.");
-MODULE_DESCRIPTION("Synaptics DSX Test Reporting Module");
-MODULE_LICENSE("GPL v2");

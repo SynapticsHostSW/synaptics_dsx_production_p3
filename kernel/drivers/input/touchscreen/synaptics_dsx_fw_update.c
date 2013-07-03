@@ -317,8 +317,6 @@ static struct device_attribute attrs[] = {
 
 static struct synaptics_rmi4_fwu_handle *fwu;
 
-DECLARE_COMPLETION(fwu_remove_complete);
-
 static unsigned int extract_uint_le(const unsigned char *ptr)
 {
 	return (unsigned int)ptr[0] +
@@ -1730,33 +1728,17 @@ static void synaptics_rmi4_fwu_remove(struct synaptics_rmi4_data *rmi4_data)
 	fwu = NULL;
 
 exit:
-	complete(&fwu_remove_complete);
-
 	return;
 }
 
-static int __init rmi4_fw_update_module_init(void)
+int dsx_fw_update_module_register(void)
 {
-	synaptics_rmi4_new_function(RMI_FW_UPDATER, true,
+	int retval;
+
+	retval = synaptics_rmi4_new_function(RMI_FW_UPDATER,
 			synaptics_rmi4_fwu_init,
 			synaptics_rmi4_fwu_remove,
 			synaptics_rmi4_fwu_attn);
-	return 0;
+
+	return retval;
 }
-
-static void __exit rmi4_fw_update_module_exit(void)
-{
-	synaptics_rmi4_new_function(RMI_FW_UPDATER, false,
-			synaptics_rmi4_fwu_init,
-			synaptics_rmi4_fwu_remove,
-			synaptics_rmi4_fwu_attn);
-	wait_for_completion(&fwu_remove_complete);
-	return;
-}
-
-module_init(rmi4_fw_update_module_init);
-module_exit(rmi4_fw_update_module_exit);
-
-MODULE_AUTHOR("Synaptics, Inc.");
-MODULE_DESCRIPTION("Synaptics DSX FW Update Module");
-MODULE_LICENSE("GPL v2");

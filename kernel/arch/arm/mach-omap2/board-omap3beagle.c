@@ -141,6 +141,11 @@ static int synaptics_gpio_setup(int gpio, bool configure)
 					__func__, gpio, retval);
 			return retval;
 		}
+
+		if (gpio == DSX_ATTN_GPIO)
+			gpio_direction_input(gpio);
+		else if (gpio == DSX_RESET_GPIO)
+			gpio_direction_output(gpio, 1);
 	} else {
 		gpio_free(gpio);
 	}

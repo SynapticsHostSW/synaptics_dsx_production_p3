@@ -383,27 +383,6 @@ config TOUCHSCREEN_SYNAPTICS_DSX_I2C
 	  To compile this driver as a module, choose M here: the
 	  module will be called synaptics_dsx_i2c.
 
-config TOUCHSCREEN_SYNAPTICS_DSX_RMI_DEV
-	tristate "Synaptics DSX touchscreen char device"
-	depends on TOUCHSCREEN_SYNAPTICS_DSX_I2C
-	help
-	  This enables support for direct register access for Synaptics DSX
-	  touchscreens.
-
-config TOUCHSCREEN_SYNAPTICS_DSX_TEST_REPORTING
-	tristate "Synaptics DSX touchscreen test reporting"
-	depends on TOUCHSCREEN_SYNAPTICS_DSX_I2C
-	help
-	  This enables support for test reporting for Synaptics DSX
-	  touchscreens.
-
-config TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE
-	tristate "Synaptics DSX touchscreen firmware update"
-	depends on TOUCHSCREEN_SYNAPTICS_DSX_I2C
-	help
-	  This enables support for firmware update for Synaptics DSX
-	  touchscreens.
-
 config TOUCHSCREEN_TOUCHRIGHT
 	tristate "Touchright serial touchscreen"
 	select SERIO

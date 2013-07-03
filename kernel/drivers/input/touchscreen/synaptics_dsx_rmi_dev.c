@@ -98,8 +98,6 @@ static struct class *rmidev_device_class;
 
 static struct rmidev_handle *rmidev;
 
-DECLARE_COMPLETION(rmidev_remove_complete);
-
 static irqreturn_t rmidev_sysfs_irq(int irq, void *data)
 {
 	struct synaptics_rmi4_data *rmi4_data = data;
@@ -743,33 +741,17 @@ static void rmidev_remove_device(struct synaptics_rmi4_data *rmi4_data)
 	rmidev = NULL;
 
 exit:
-	complete(&rmidev_remove_complete);
-
 	return;
 }
 
-static int __init rmidev_module_init(void)
+int dsx_rmidev_module_register(void)
 {
-	synaptics_rmi4_new_function(RMI_DEV, true,
+	int retval;
+
+	retval = synaptics_rmi4_new_function(RMI_DEV,
 			rmidev_init_device,
 			rmidev_remove_device,
 			NULL);
-	return 0;
+
+	return retval;
 }
-
-static void __exit rmidev_module_exit(void)
-{
-	synaptics_rmi4_new_function(RMI_DEV, false,
-			rmidev_init_device,
-			rmidev_remove_device,
-			NULL);
-	wait_for_completion(&rmidev_remove_complete);
-	return;
-}
-
-module_init(rmidev_module_init);
-module_exit(rmidev_module_exit);
-
-MODULE_AUTHOR("Synaptics, Inc.");
-MODULE_DESCRIPTION("Synaptics DSX RMI Dev Module");
-MODULE_LICENSE("GPL v2");

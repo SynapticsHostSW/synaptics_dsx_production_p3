@@ -256,12 +256,15 @@ struct synaptics_rmi4_exp_fn_ptr {
 	int (*enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
 };
 
-void synaptics_rmi4_new_function(enum exp_fn fn_type, bool insert,
+int synaptics_rmi4_new_function(enum exp_fn fn_type,
 		int (*func_init)(struct synaptics_rmi4_data *rmi4_data),
 		void (*func_remove)(struct synaptics_rmi4_data *rmi4_data),
 		void (*func_attn)(struct synaptics_rmi4_data *rmi4_data,
 				unsigned char intr_mask));
 
+int dsx_rmidev_module_register(void);
+int dsx_test_reporting_module_register(void);
+int dsx_fw_update_module_register(void);
 int synaptics_fw_updater(unsigned char *fw_data);
 
 static inline ssize_t synaptics_rmi4_show_error(struct device *dev,

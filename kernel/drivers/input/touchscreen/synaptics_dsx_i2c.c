@@ -58,7 +58,6 @@
 #define RPT_WY (1 << 7)
 #define RPT_DEFAULT (RPT_TYPE | RPT_X_LSB | RPT_X_MSB | RPT_Y_LSB | RPT_Y_MSB)
 
-#define EXP_FN_WORK_DELAY_MS 1000 /* ms */
 #define SYN_I2C_RETRY_TIMES 10
 #define MAX_F11_TOUCH_WIDTH 15
 
@@ -326,25 +325,13 @@ struct synaptics_rmi4_f1a_handle {
 
 struct synaptics_rmi4_exp_fn {
 	enum exp_fn fn_type;
-	bool inserted;
+	bool initialized;
 	int (*func_init)(struct synaptics_rmi4_data *rmi4_data);
 	void (*func_remove)(struct synaptics_rmi4_data *rmi4_data);
 	void (*func_attn)(struct synaptics_rmi4_data *rmi4_data,
 			unsigned char intr_mask);
 	struct list_head link;
 };
-
-struct synaptics_rmi4_exp_fn_data {
-	bool initialized;
-	bool queue_work;
-	struct mutex mutex;
-	struct list_head list;
-	struct delayed_work work;
-	struct workqueue_struct *workqueue;
-	struct synaptics_rmi4_data *rmi4_data;
-};
-
-static struct synaptics_rmi4_exp_fn_data exp_data;
 
 static struct device_attribute attrs[] = {
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -371,6 +358,8 @@ static struct device_attribute attrs[] = {
 			synaptics_rmi4_show_error,
 			synaptics_rmi4_suspend_store),
 };
+
+static struct list_head exp_fn_list;
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static ssize_t synaptics_rmi4_full_pm_cycle_show(struct device *dev,
@@ -1234,15 +1223,13 @@ static void synaptics_rmi4_sensor_report(struct synaptics_rmi4_data *rmi4_data)
 		}
 	}
 
-	mutex_lock(&exp_data.mutex);
-	if (!list_empty(&exp_data.list)) {
-		list_for_each_entry(exp_fhandler, &exp_data.list, link) {
-			if (exp_fhandler->inserted &&
+	if (!list_empty(&exp_fn_list)) {
+		list_for_each_entry(exp_fhandler, &exp_fn_list, link) {
+			if (exp_fhandler->initialized &&
 					(exp_fhandler->func_attn != NULL))
 				exp_fhandler->func_attn(rmi4_data, intr[0]);
 		}
 	}
-	mutex_unlock(&exp_data.mutex);
 
 	return;
 }
@@ -2433,16 +2420,14 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 		}
 	}
 
-	mutex_lock(&exp_data.mutex);
-	if (!list_empty(&exp_data.list)) {
-		list_for_each_entry(exp_fhandler, &exp_data.list, link) {
+	if (!list_empty(&exp_fn_list)) {
+		list_for_each_entry(exp_fhandler, &exp_fn_list, link) {
 			if (exp_fhandler->fn_type == RMI_F54) {
 				exp_fhandler->func_remove(rmi4_data);
 				exp_fhandler->func_init(rmi4_data);
 			}
 		}
 	}
-	mutex_unlock(&exp_data.mutex);
 
 	rmi4_data->touch_stopped = false;
 
@@ -2451,56 +2436,74 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 	return 0;
 }
 
-/**
-* synaptics_rmi4_exp_fn_work()
-*
-* Called by the kernel at the scheduled time.
-*
-* This function is a work thread that checks for the insertion and
-* removal of other expansion Function modules such as rmi_dev and calls
-* their initialization and removal callback functions accordingly.
-*/
-static void synaptics_rmi4_exp_fn_work(struct work_struct *work)
+static int synaptics_rmi4_init_exp_fn(struct synaptics_rmi4_data *rmi4_data)
 {
+	int retval;
 	struct synaptics_rmi4_exp_fn *exp_fhandler, *next_list_entry;
-	struct synaptics_rmi4_data *rmi4_data = exp_data.rmi4_data;
 
-	mutex_lock(&exp_data.mutex);
-	if (!list_empty(&exp_data.list)) {
-		list_for_each_entry_safe(exp_fhandler,
-				next_list_entry,
-				&exp_data.list,
-				link) {
-			if ((exp_fhandler->func_init != NULL) &&
-					(exp_fhandler->inserted == false)) {
-				exp_fhandler->func_init(rmi4_data);
-				exp_fhandler->inserted = true;
-			} else if ((exp_fhandler->func_init == NULL) &&
-					(exp_fhandler->inserted == true)) {
-				exp_fhandler->func_remove(rmi4_data);
-				list_del(&exp_fhandler->link);
-				kfree(exp_fhandler);
+	INIT_LIST_HEAD(&exp_fn_list);
+
+	retval = dsx_rmidev_module_register();
+	if (retval < 0) {
+		dev_err(&rmi4_data->i2c_client->dev,
+				"%s: Failed to register rmidev module\n",
+				__func__);
+		goto error_exit;
+	}
+
+	retval = dsx_test_reporting_module_register();
+	if (retval < 0) {
+		dev_err(&rmi4_data->i2c_client->dev,
+				"%s: Failed to register test reporting module\n",
+				__func__);
+		goto error_exit;
+	}
+
+	retval = dsx_fw_update_module_register();
+	if (retval < 0) {
+		dev_err(&rmi4_data->i2c_client->dev,
+				"%s: Failed to register fw update module\n",
+				__func__);
+		goto error_exit;
+	}
+
+	if (list_empty(&exp_fn_list))
+		return -ENODEV;
+
+	list_for_each_entry(exp_fhandler, &exp_fn_list, link) {
+		if (exp_fhandler->func_init != NULL) {
+			retval = exp_fhandler->func_init(rmi4_data);
+			if (retval < 0) {
+				dev_err(&rmi4_data->i2c_client->dev,
+						"%s: Failed to init exp fn\n",
+						__func__);
+				goto error_exit;
+			} else {
+				exp_fhandler->initialized = true;
 			}
 		}
 	}
-	mutex_unlock(&exp_data.mutex);
 
-	return;
+	return 0;
+
+error_exit:
+	if (!list_empty(&exp_fn_list)) {
+		list_for_each_entry_safe(exp_fhandler,
+				next_list_entry,
+				&exp_fn_list,
+				link) {
+			if (exp_fhandler->initialized &&
+					(exp_fhandler->func_remove != NULL))
+				exp_fhandler->func_remove(rmi4_data);
+			list_del(&exp_fhandler->link);
+			kfree(exp_fhandler);
+		}
+	}
+
+	return retval;
 }
 
-/**
-* synaptics_rmi4_new_function()
-*
-* Called by other expansion Function modules in their module init and
-* module exit functions.
-*
-* This function is used by other expansion Function modules such as
-* rmi_dev to register themselves with the driver by providing their
-* initialization and removal callback function pointers so that they
-* can be inserted or removed dynamically at module init and exit times,
-* respectively.
-*/
-void synaptics_rmi4_new_function(enum exp_fn fn_type, bool insert,
+int synaptics_rmi4_new_function(enum exp_fn fn_type,
 		int (*func_init)(struct synaptics_rmi4_data *rmi4_data),
 		void (*func_remove)(struct synaptics_rmi4_data *rmi4_data),
 		void (*func_attn)(struct synaptics_rmi4_data *rmi4_data,
@@ -2508,48 +2511,20 @@ void synaptics_rmi4_new_function(enum exp_fn fn_type, bool insert,
 {
 	struct synaptics_rmi4_exp_fn *exp_fhandler;
 
-	if (!exp_data.initialized) {
-		mutex_init(&exp_data.mutex);
-		INIT_LIST_HEAD(&exp_data.list);
-		exp_data.initialized = true;
+	exp_fhandler = kzalloc(sizeof(*exp_fhandler), GFP_KERNEL);
+	if (!exp_fhandler) {
+		pr_err("%s: Failed to alloc mem for expansion function\n",
+				__func__);
+		return -ENOMEM;
 	}
+	exp_fhandler->fn_type = fn_type;
+	exp_fhandler->func_init = func_init;
+	exp_fhandler->func_attn = func_attn;
+	exp_fhandler->func_remove = func_remove;
+	list_add_tail(&exp_fhandler->link, &exp_fn_list);
 
-	mutex_lock(&exp_data.mutex);
-	if (insert) {
-		exp_fhandler = kzalloc(sizeof(*exp_fhandler), GFP_KERNEL);
-		if (!exp_fhandler) {
-			pr_err("%s: Failed to alloc mem for expansion function\n",
-					__func__);
-			goto exit;
-		}
-		exp_fhandler->fn_type = fn_type;
-		exp_fhandler->func_init = func_init;
-		exp_fhandler->func_attn = func_attn;
-		exp_fhandler->func_remove = func_remove;
-		exp_fhandler->inserted = false;
-		list_add_tail(&exp_fhandler->link, &exp_data.list);
-	} else if (!list_empty(&exp_data.list)) {
-		list_for_each_entry(exp_fhandler, &exp_data.list, link) {
-			if (exp_fhandler->fn_type == fn_type) {
-				exp_fhandler->func_init = NULL;
-				exp_fhandler->func_attn = NULL;
-				goto exit;
-			}
-		}
-	}
-
-exit:
-	mutex_unlock(&exp_data.mutex);
-
-	if (exp_data.queue_work) {
-		queue_delayed_work(exp_data.workqueue,
-				&exp_data.work,
-				msecs_to_jiffies(EXP_FN_WORK_DELAY_MS));
-	}
-
-	return;
+	return 0;
 }
-EXPORT_SYMBOL(synaptics_rmi4_new_function);
 
  /**
  * synaptics_rmi4_probe()
@@ -2570,6 +2545,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 {
 	int retval;
 	unsigned char attr_count;
+	struct synaptics_rmi4_exp_fn *exp_fhandler;
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data;
 	struct synaptics_rmi4_device_info *rmi;
@@ -2673,6 +2649,14 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 
 	rmi4_data->irq = gpio_to_irq(platform_data->irq_gpio);
 
+	retval = synaptics_rmi4_init_exp_fn(rmi4_data);
+	if (retval < 0) {
+		dev_err(&client->dev,
+				"%s: Failed to initialize expansion functions\n",
+				__func__);
+		goto err_init_exp_fn;
+	}
+
 	retval = synaptics_rmi4_irq_enable(rmi4_data, true);
 	if (retval < 0) {
 		dev_err(&client->dev,
@@ -2680,20 +2664,6 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 				__func__);
 		goto err_enable_irq;
 	}
-
-	if (!exp_data.initialized) {
-		mutex_init(&exp_data.mutex);
-		INIT_LIST_HEAD(&exp_data.list);
-		exp_data.initialized = true;
-	}
-
-	exp_data.workqueue = create_singlethread_workqueue("dsx_exp_workqueue");
-	INIT_DELAYED_WORK(&exp_data.work, synaptics_rmi4_exp_fn_work);
-	exp_data.rmi4_data = rmi4_data;
-	exp_data.queue_work = true;
-	queue_delayed_work(exp_data.workqueue,
-			&exp_data.work,
-			msecs_to_jiffies(EXP_FN_WORK_DELAY_MS));
 
 	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
 		retval = sysfs_create_file(&rmi4_data->input_dev->dev.kobj,
@@ -2714,13 +2684,18 @@ err_sysfs:
 				&attrs[attr_count].attr);
 	}
 
-	cancel_delayed_work_sync(&exp_data.work);
-	flush_workqueue(exp_data.workqueue);
-	destroy_workqueue(exp_data.workqueue);
-
 	synaptics_rmi4_irq_enable(rmi4_data, false);
 
 err_enable_irq:
+	if (!list_empty(&exp_fn_list)) {
+		list_for_each_entry(exp_fhandler, &exp_fn_list, link) {
+			if (exp_fhandler->func_remove != NULL)
+				exp_fhandler->func_remove(rmi4_data);
+			kfree(exp_fhandler);
+		}
+}
+
+err_init_exp_fn:
 	if (platform_data->gpio_config && (platform_data->reset_gpio >= 0))
 		platform_data->gpio_config(platform_data->reset_gpio, false);
 
@@ -2772,6 +2747,7 @@ err_regulator:
 static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 {
 	unsigned char attr_count;
+	struct synaptics_rmi4_exp_fn *exp_fhandler;
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data = i2c_get_clientdata(client);
 	struct synaptics_rmi4_device_info *rmi;
@@ -2799,9 +2775,13 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 				&attrs[attr_count].attr);
 	}
 
-	cancel_delayed_work_sync(&exp_data.work);
-	flush_workqueue(exp_data.workqueue);
-	destroy_workqueue(exp_data.workqueue);
+	if (!list_empty(&exp_fn_list)) {
+		list_for_each_entry(exp_fhandler, &exp_fn_list, link) {
+			if (exp_fhandler->func_remove != NULL)
+				exp_fhandler->func_remove(rmi4_data);
+			kfree(exp_fhandler);
+		}
+	}
 
 	if (!list_empty(&rmi->support_fn_list)) {
 		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
