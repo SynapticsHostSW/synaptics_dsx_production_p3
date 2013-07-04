@@ -3160,6 +3160,9 @@ static int synaptics_rmi4_f54_init(struct synaptics_rmi4_data *rmi4_data)
 	bool f55found = false;
 	struct synaptics_rmi4_fn_desc rmi_fd;
 
+	if (rmi4_data->flash_prog_mode)
+		return 0;
+
 	f54 = kzalloc(sizeof(*f54), GFP_KERNEL);
 	if (!f54) {
 		dev_err(&rmi4_data->i2c_client->dev,
