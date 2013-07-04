@@ -48,6 +48,7 @@ struct synaptics_dsx_platform_data {
 	bool y_flip;
 	bool swap_axes;
 	bool regulator_en;
+	const char *reg_name;
 	int reset_gpio;
 	int irq_gpio;
 	unsigned long irq_flags;

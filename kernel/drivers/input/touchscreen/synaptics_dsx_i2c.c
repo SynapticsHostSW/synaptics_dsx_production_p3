@@ -2607,7 +2607,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	rmi = &(rmi4_data->rmi4_mod_info);
 
 	if (platform_data->regulator_en) {
-		rmi4_data->regulator = regulator_get(&client->dev, "vdd");
+		rmi4_data->regulator = regulator_get(&client->dev, platform_data->reg_name);
 		if (IS_ERR(rmi4_data->regulator)) {
 			dev_err(&client->dev,
 					"%s: Failed to get regulator\n",
@@ -2615,6 +2615,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 			retval = PTR_ERR(rmi4_data->regulator);
 			goto err_regulator;
 		}
+		regulator_set_voltage(rmi4_data->regulator, 3300000, 3300000);
 		regulator_enable(rmi4_data->regulator);
 		msleep(platform_data->reset_delay_ms);
 	}
