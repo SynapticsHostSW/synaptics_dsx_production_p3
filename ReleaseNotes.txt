@@ -2,6 +2,12 @@
 //  Synaptics DSX I2C Driver
 ///////////////////////////////////////////////////////////
 
+v1.17 Jul 05, 2013 scott.lin@tw.synaptics.com
+   - Skip initializing test reporting module if stuck in bootloader mode during power-up
+   - Add support for doing lockdown during re-flash
+   - Wrap #ifdef CONFIG_HAS_EARLYSUSPEND around early_suspend (struct early_suspend)
+   - Re-register number of fingers for TYPE_B_PROTOCOL after doing reset
+
 v1.16 May 21, 2013 scott.lin@tw.synaptics.com
    - Add support for using F54_ANALOG_CTRL88 to turn off CBC when reading test reports
    - Expose actual numbers of assigned Rx and Tx electrodes to user space through sysfs
