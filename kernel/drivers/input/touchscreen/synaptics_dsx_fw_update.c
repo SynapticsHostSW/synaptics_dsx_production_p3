@@ -1077,6 +1077,7 @@ write_config:
 static int fwu_start_write_config(void)
 {
 	int retval;
+	unsigned short block_count;
 	unsigned short f01_cmd_base_addr;
 	struct image_header_data header;
 
@@ -1084,18 +1085,22 @@ static int fwu_start_write_config(void)
 
 	switch (fwu->config_area) {
 	case UI_CONFIG_AREA:
+		block_count = fwu->config_block_count;
 		break;
 	case PERM_CONFIG_AREA:
 		if (!fwu->has_perm_config)
 			return -EINVAL;
+		block_count = fwu->perm_config_block_count;
 		break;
 	case BL_CONFIG_AREA:
 		if (!fwu->has_bl_config)
 			return -EINVAL;
+		block_count = fwu->bl_config_block_count;
 		break;
 	case DISP_CONFIG_AREA:
 		if (!fwu->has_disp_config)
 			return -EINVAL;
+		block_count = fwu->disp_config_block_count;
 		break;
 	default:
 		return -EINVAL;
@@ -1106,7 +1111,11 @@ static int fwu_start_write_config(void)
 	else
 		return -EINVAL;
 
-	if (fwu->config_area == UI_CONFIG_AREA) {
+	fwu->config_size = fwu->block_size * block_count;
+
+	/* Jump to the config area if given a packrat image */
+	if ((fwu->config_area == UI_CONFIG_AREA) &&
+			(fwu->config_size != fwu->image_size)) {
 		parse_header(&header, fwu->ext_data_source);
 
 		if (header.config_size) {
