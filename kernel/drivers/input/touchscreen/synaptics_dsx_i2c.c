@@ -2008,6 +2008,36 @@ error_exit:
 	return retval;
 }
 
+static void synaptics_rmi4_empty_fn_list(struct synaptics_rmi4_data *rmi4_data)
+{
+	struct synaptics_rmi4_fn *fhandler;
+	struct synaptics_rmi4_fn *fhandler_temp;
+	struct synaptics_rmi4_device_info *rmi;
+
+	rmi = &(rmi4_data->rmi4_mod_info);
+
+	if (!list_empty(&rmi->support_fn_list)) {
+		list_for_each_entry_safe(fhandler,
+				fhandler_temp,
+				&rmi->support_fn_list,
+				link) {
+			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
+				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
+			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
+				synaptics_rmi4_f1a_kfree(fhandler);
+			} else {
+				kfree(fhandler->extra);
+				kfree(fhandler->data);
+			}
+			list_del(&fhandler->link);
+			kfree(fhandler);
+		}
+	}
+	INIT_LIST_HEAD(&rmi->support_fn_list);
+
+	return;
+}
+
 static int synaptics_rmi4_check_status(struct synaptics_rmi4_data *rmi4_data,
 		bool *was_in_bl_mode)
 {
@@ -2435,7 +2465,6 @@ static int synaptics_rmi4_set_input_dev(struct synaptics_rmi4_data *rmi4_data)
 {
 	int retval;
 	int temp;
-	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_device_info *rmi;
 
 	rmi = &(rmi4_data->rmi4_mod_info);
@@ -2501,19 +2530,7 @@ err_register_input:
 	input_free_device(rmi4_data->input_dev);
 
 err_query_device:
-	if (!list_empty(&rmi->support_fn_list)) {
-		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
-				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
-			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
-				synaptics_rmi4_f1a_kfree(fhandler);
-			} else {
-				kfree(fhandler->extra);
-				kfree(fhandler->data);
-			}
-			kfree(fhandler);
-		}
-	}
+	synaptics_rmi4_empty_fn_list(rmi4_data);
 
 err_input_device:
 	return retval;
@@ -2597,7 +2614,6 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 	int retval;
 	int temp;
 	unsigned char command = 0x01;
-	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_exp_fn *exp_fhandler;
 	struct synaptics_rmi4_device_info *rmi;
 
@@ -2623,19 +2639,7 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 
 	synaptics_rmi4_free_fingers(rmi4_data);
 
-	if (!list_empty(&rmi->support_fn_list)) {
-		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
-				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
-			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
-				synaptics_rmi4_f1a_kfree(fhandler);
-			} else {
-				kfree(fhandler->extra);
-				kfree(fhandler->data);
-			}
-			kfree(fhandler);
-		}
-	}
+	synaptics_rmi4_empty_fn_list(rmi4_data);
 
 	retval = synaptics_rmi4_query_device(rmi4_data);
 	if (retval < 0) {
@@ -2683,13 +2687,14 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 */
 static void synaptics_rmi4_exp_fn_work(struct work_struct *work)
 {
-	struct synaptics_rmi4_exp_fn *exp_fhandler, *next_list_entry;
+	struct synaptics_rmi4_exp_fn *exp_fhandler;
+	struct synaptics_rmi4_exp_fn *exp_fhandler_temp;
 	struct synaptics_rmi4_data *rmi4_data = exp_data.rmi4_data;
 
 	mutex_lock(&exp_data.mutex);
 	if (!list_empty(&exp_data.list)) {
 		list_for_each_entry_safe(exp_fhandler,
-				next_list_entry,
+				exp_fhandler_temp,
 				&exp_data.list,
 				link) {
 			if ((exp_fhandler->func_init != NULL) &&
@@ -2791,9 +2796,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 {
 	int retval;
 	unsigned char attr_count;
-	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data;
-	struct synaptics_rmi4_device_info *rmi;
 	const struct synaptics_dsx_platform_data *platform_data =
 			client->dev.platform_data;
 
@@ -2819,8 +2822,6 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 				__func__);
 		return -ENOMEM;
 	}
-
-	rmi = &(rmi4_data->rmi4_mod_info);
 
 	if (platform_data->regulator_en) {
 		rmi4_data->regulator = regulator_get(&client->dev, "vdd");
@@ -2951,19 +2952,7 @@ err_gpio_reset:
 		platform_data->gpio_config(platform_data->irq_gpio, false);
 
 err_gpio_attn:
-	if (!list_empty(&rmi->support_fn_list)) {
-		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
-				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
-			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
-				synaptics_rmi4_f1a_kfree(fhandler);
-			} else {
-				kfree(fhandler->extra);
-				kfree(fhandler->data);
-			}
-			kfree(fhandler);
-		}
-	}
+	synaptics_rmi4_empty_fn_list(rmi4_data);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	unregister_early_suspend(&rmi4_data->early_suspend);
@@ -2996,13 +2985,9 @@ err_regulator:
 static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 {
 	unsigned char attr_count;
-	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data = i2c_get_clientdata(client);
-	struct synaptics_rmi4_device_info *rmi;
 	const struct synaptics_dsx_platform_data *platform_data =
 			rmi4_data->board;
-
-	rmi = &(rmi4_data->rmi4_mod_info);
 
 	synaptics_rmi4_irq_enable(rmi4_data, false);
 
@@ -3027,19 +3012,7 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 	flush_workqueue(exp_data.workqueue);
 	destroy_workqueue(exp_data.workqueue);
 
-	if (!list_empty(&rmi->support_fn_list)) {
-		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F12) {
-				synaptics_rmi4_f12_kfree(rmi4_data, fhandler);
-			} else if (fhandler->fn_number == SYNAPTICS_RMI4_F1A) {
-				synaptics_rmi4_f1a_kfree(fhandler);
-			} else {
-				kfree(fhandler->extra);
-				kfree(fhandler->data);
-			}
-			kfree(fhandler);
-		}
-	}
+	synaptics_rmi4_empty_fn_list(rmi4_data);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	unregister_early_suspend(&rmi4_data->early_suspend);
