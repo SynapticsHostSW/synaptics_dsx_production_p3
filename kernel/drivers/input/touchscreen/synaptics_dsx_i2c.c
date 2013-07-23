@@ -44,6 +44,10 @@
 */
 #define REPORT_2D_W
 
+#define ACTIVE_PEN_MAX_PRESSURE_16BIT 65535
+#define ACTIVE_PEN_MAX_PRESSURE_8BIT 255
+#define DEFAULT_FINGER_PRESSURE 1
+
 /*
 #define IGNORE_FN_INIT_FAILURE
 */
@@ -283,9 +287,7 @@ struct synaptics_rmi4_pen_data {
 	unsigned char x_msb;
 	unsigned char y_lsb;
 	unsigned char y_msb;
-#ifdef ACTIVE_PEN_16BIT_PRESSURE
 	unsigned char pressure_lsb;
-#endif
 	unsigned char pressure_msb;
 };
 
@@ -728,10 +730,11 @@ static int synaptics_rmi4_pen_report(struct synaptics_rmi4_data *rmi4_data,
 	int retval;
 	int x;
 	int y;
+	int pressure;
 	unsigned short data_addr;
 	struct synaptics_rmi4_pen_data *pen_data;
 	struct synaptics_rmi4_f12_extra_data *extra_data;
-	static bool pen_active = false;
+	static bool pen_active;
 
 	data_addr = fhandler->full_addr.data_base;
 	extra_data = (struct synaptics_rmi4_f12_extra_data *)fhandler->extra;
@@ -792,26 +795,29 @@ static int synaptics_rmi4_pen_report(struct synaptics_rmi4_data *rmi4_data,
 			MT_TOOL_PEN, 1);
 #endif
 
-	if (pen_data->pressure_msb) {
-		input_report_key(rmi4_data->input_dev,
-				BTN_TOUCH, 1);
+	if (rmi4_data->pen_max_pressure == ACTIVE_PEN_MAX_PRESSURE_16BIT) {
+		pressure = (pen_data->pressure_msb << 8) |
+				pen_data->pressure_lsb;
 	} else {
-		input_report_key(rmi4_data->input_dev,
-				BTN_TOUCH, 0);
+		pressure = pen_data->pressure_lsb;
 	}
 
-	if (pen_data->status_invert) {
-		input_report_key(rmi4_data->input_dev,
-				BTN_TOOL_RUBBER, 1);
-	} else {
-		input_report_key(rmi4_data->input_dev,
-				BTN_TOOL_PEN, 1);
-	}
+	input_report_key(rmi4_data->input_dev,
+			BTN_TOUCH, pressure > 0 ? 1 : 0);
+
+	input_report_key(rmi4_data->input_dev,
+			pen_data->status_invert > 0 ?
+			BTN_TOOL_RUBBER : BTN_TOOL_PEN, 1);
 
 	input_report_abs(rmi4_data->input_dev,
 			ABS_MT_POSITION_X, x);
 	input_report_abs(rmi4_data->input_dev,
 			ABS_MT_POSITION_Y, y);
+	input_report_abs(rmi4_data->input_dev,
+			ABS_MT_PRESSURE, pressure);
+
+	input_report_key(rmi4_data->input_dev,
+			BTN_STYLUS, pen_data->status_barrel > 0 ? 1 : 0);
 
 #ifndef TYPE_B_PROTOCOL
 	input_mt_sync(rmi4_data->input_dev);
@@ -831,7 +837,7 @@ static int synaptics_rmi4_pen_report(struct synaptics_rmi4_data *rmi4_data,
 			pen_data->status_pen,
 			pen_data->status_invert,
 			pen_data->status_barrel,
-			x, y, pen_data->pressure_msb);
+			x, y, pressure);
 
 	return 1;
 }
@@ -1124,6 +1130,11 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 			input_report_abs(rmi4_data->input_dev,
 					ABS_MT_TOUCH_MINOR, min(wx, wy));
 #endif
+			if (rmi4_data->active_pen) {
+				input_report_abs(rmi4_data->input_dev,
+						ABS_MT_PRESSURE,
+						DEFAULT_FINGER_PRESSURE);
+			}
 #ifndef TYPE_B_PROTOCOL
 			input_mt_sync(rmi4_data->input_dev);
 #endif
@@ -1454,6 +1465,52 @@ static int synaptics_rmi4_irq_enable(struct synaptics_rmi4_data *rmi4_data,
 	return retval;
 }
 
+static int synaptics_rmi4_pen_pressure(struct synaptics_rmi4_data *rmi4_data,
+		struct synaptics_rmi4_fn *fhandler,
+		struct synaptics_rmi4_f12_query_8 *query_8)
+{
+	int retval;
+	unsigned char ii;
+	unsigned char data_reg_presence;
+	unsigned char size_of_query_9;
+	unsigned char *query_9;
+	unsigned char *data_desc;
+
+	data_reg_presence = query_8->data[1];
+
+	size_of_query_9 = query_8->size_of_query9;
+	query_9 = kmalloc(size_of_query_9, GFP_KERNEL);
+
+	retval = synaptics_rmi4_i2c_read(rmi4_data,
+			fhandler->full_addr.query_base + 9,
+			query_9,
+			size_of_query_9);
+	if (retval < 0)
+		goto exit;
+
+	data_desc = query_9;
+
+	for (ii = 0; ii < 6; ii++) {
+		if (!(data_reg_presence & (1 << ii)))
+			continue; /* The data register is not present */
+		data_desc++; /* Jump over the size entry */
+		while (*data_desc & (1 << 7))
+			data_desc++;
+		data_desc++; /* Go to the next descriptor */
+	}
+
+	data_desc++; /* Jump over the size entry */
+	if (*data_desc & (1 << 1)) /* Check for the presence of subpacket 1 */
+		rmi4_data->pen_max_pressure = ACTIVE_PEN_MAX_PRESSURE_16BIT;
+	else
+		rmi4_data->pen_max_pressure = ACTIVE_PEN_MAX_PRESSURE_8BIT;
+
+exit:
+	kfree(query_9);
+
+	return retval;
+}
+
  /**
  * synaptics_rmi4_f11_init()
  *
@@ -1691,6 +1748,11 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 				query_8.data4_is_present +
 				query_8.data5_is_present;
 		extra_data->pen_data = kmalloc(sizeof(*pen_data), GFP_KERNEL);
+		retval = synaptics_rmi4_pen_pressure(rmi4_data,
+				fhandler,
+				&query_8);
+		if (retval < 0)
+			return retval;
 	} else {
 		rmi4_data->active_pen = false;
 	}
@@ -2315,12 +2377,64 @@ flash_prog_mode:
 	return 0;
 }
 
+static void synaptics_rmi4_set_params(struct synaptics_rmi4_data *rmi4_data)
+{
+	unsigned char ii;
+	struct synaptics_rmi4_f1a_handle *f1a;
+	struct synaptics_rmi4_fn *fhandler;
+	struct synaptics_rmi4_device_info *rmi;
+
+	rmi = &(rmi4_data->rmi4_mod_info);
+
+	input_set_abs_params(rmi4_data->input_dev,
+			ABS_MT_POSITION_X, 0,
+			rmi4_data->sensor_max_x, 0, 0);
+	input_set_abs_params(rmi4_data->input_dev,
+			ABS_MT_POSITION_Y, 0,
+			rmi4_data->sensor_max_y, 0, 0);
+#ifdef REPORT_2D_W
+	input_set_abs_params(rmi4_data->input_dev,
+			ABS_MT_TOUCH_MAJOR, 0,
+			rmi4_data->max_touch_width, 0, 0);
+	input_set_abs_params(rmi4_data->input_dev,
+			ABS_MT_TOUCH_MINOR, 0,
+			rmi4_data->max_touch_width, 0, 0);
+#endif
+	if (rmi4_data->active_pen) {
+		input_set_abs_params(rmi4_data->input_dev,
+				ABS_MT_PRESSURE, 0,
+				rmi4_data->pen_max_pressure, 0, 0);
+	}
+
+#ifdef TYPE_B_PROTOCOL
+	input_mt_init_slots(rmi4_data->input_dev,
+			rmi4_data->num_of_fingers);
+#endif
+
+	f1a = NULL;
+	if (!list_empty(&rmi->support_fn_list)) {
+		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
+			if (fhandler->fn_number == SYNAPTICS_RMI4_F1A)
+				f1a = fhandler->data;
+		}
+	}
+
+	if (f1a) {
+		for (ii = 0; ii < f1a->valid_button_count; ii++) {
+			set_bit(f1a->button_map[ii],
+					rmi4_data->input_dev->keybit);
+			input_set_capability(rmi4_data->input_dev,
+					EV_KEY, f1a->button_map[ii]);
+		}
+	}
+
+	return;
+}
+
 static int synaptics_rmi4_set_input_dev(struct synaptics_rmi4_data *rmi4_data)
 {
 	int retval;
 	int temp;
-	unsigned char ii;
-	struct synaptics_rmi4_f1a_handle *f1a;
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_device_info *rmi;
 
@@ -2359,6 +2473,7 @@ static int synaptics_rmi4_set_input_dev(struct synaptics_rmi4_data *rmi4_data)
 	if (rmi4_data->active_pen) {
 		set_bit(BTN_TOOL_PEN, rmi4_data->input_dev->keybit);
 		set_bit(BTN_TOOL_RUBBER, rmi4_data->input_dev->keybit);
+		set_bit(BTN_STYLUS, rmi4_data->input_dev->keybit);
 	}
 #ifdef INPUT_PROP_DIRECT
 	set_bit(INPUT_PROP_DIRECT, rmi4_data->input_dev->propbit);
@@ -2370,42 +2485,7 @@ static int synaptics_rmi4_set_input_dev(struct synaptics_rmi4_data *rmi4_data)
 		rmi4_data->sensor_max_y = temp;
 	}
 
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_POSITION_X, 0,
-			rmi4_data->sensor_max_x, 0, 0);
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_POSITION_Y, 0,
-			rmi4_data->sensor_max_y, 0, 0);
-#ifdef REPORT_2D_W
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_TOUCH_MAJOR, 0,
-			rmi4_data->max_touch_width, 0, 0);
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_TOUCH_MINOR, 0,
-			rmi4_data->max_touch_width, 0, 0);
-#endif
-
-#ifdef TYPE_B_PROTOCOL
-	input_mt_init_slots(rmi4_data->input_dev,
-			rmi4_data->num_of_fingers);
-#endif
-
-	f1a = NULL;
-	if (!list_empty(&rmi->support_fn_list)) {
-		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F1A)
-				f1a = fhandler->data;
-		}
-	}
-
-	if (f1a) {
-		for (ii = 0; ii < f1a->valid_button_count; ii++) {
-			set_bit(f1a->button_map[ii],
-					rmi4_data->input_dev->keybit);
-			input_set_capability(rmi4_data->input_dev,
-					EV_KEY, f1a->button_map[ii]);
-		}
-	}
+	synaptics_rmi4_set_params(rmi4_data);
 
 	retval = input_register_device(rmi4_data->input_dev);
 	if (retval) {
@@ -2516,9 +2596,7 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 {
 	int retval;
 	int temp;
-	unsigned char ii;
 	unsigned char command = 0x01;
-	struct synaptics_rmi4_f1a_handle *f1a;
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_exp_fn *exp_fhandler;
 	struct synaptics_rmi4_device_info *rmi;
@@ -2574,42 +2652,7 @@ static int synaptics_rmi4_reset_device(struct synaptics_rmi4_data *rmi4_data,
 		rmi4_data->sensor_max_y = temp;
 	}
 
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_POSITION_X, 0,
-			rmi4_data->sensor_max_x, 0, 0);
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_POSITION_Y, 0,
-			rmi4_data->sensor_max_y, 0, 0);
-#ifdef REPORT_2D_W
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_TOUCH_MAJOR, 0,
-			rmi4_data->max_touch_width, 0, 0);
-	input_set_abs_params(rmi4_data->input_dev,
-			ABS_MT_TOUCH_MINOR, 0,
-			rmi4_data->max_touch_width, 0, 0);
-#endif
-
-#ifdef TYPE_B_PROTOCOL
-	input_mt_init_slots(rmi4_data->input_dev,
-			rmi4_data->num_of_fingers);
-#endif
-
-	f1a = NULL;
-	if (!list_empty(&rmi->support_fn_list)) {
-		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
-			if (fhandler->fn_number == SYNAPTICS_RMI4_F1A)
-				f1a = fhandler->data;
-		}
-	}
-
-	if (f1a) {
-		for (ii = 0; ii < f1a->valid_button_count; ii++) {
-			set_bit(f1a->button_map[ii],
-					rmi4_data->input_dev->keybit);
-			input_set_capability(rmi4_data->input_dev,
-					EV_KEY, f1a->button_map[ii]);
-		}
-	}
+	synaptics_rmi4_set_params(rmi4_data);
 
 	mutex_lock(&exp_data.mutex);
 	if (!list_empty(&exp_data.list)) {
