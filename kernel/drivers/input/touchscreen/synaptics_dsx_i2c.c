@@ -45,6 +45,10 @@
 */
 #define REPORT_2D_W
 
+/*
+#define USE_F12_DATA_15
+*/
+
 #define ACTIVE_PEN_MAX_PRESSURE_16BIT 65535
 #define ACTIVE_PEN_MAX_PRESSURE_8BIT 255
 
@@ -990,7 +994,6 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 {
 	int retval;
 	unsigned char touch_count = 0; /* number of touch points */
-	unsigned char index;
 	unsigned char finger;
 	unsigned char fingers_to_process;
 	unsigned char finger_status;
@@ -1016,6 +1019,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 			return touch_count;
 	}
 
+#ifdef USE_F12_DATA_15
 	/* Determine the total number of fingers to process */
 	if (extra_data->data15_size) {
 		retval = synaptics_rmi4_i2c_read(rmi4_data,
@@ -1026,16 +1030,16 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 			return 0;
 
 		/* Start checking from the highest bit */
-		index = extra_data->data15_size - 1; /* Highest byte */
+		temp = extra_data->data15_size - 1; /* Highest byte */
 		finger = (fingers_to_process - 1) % 8; /* Highest bit */
 		do {
-			if (extra_data->data15_data[index] & (1 << finger))
+			if (extra_data->data15_data[temp] & (1 << finger))
 				break;
 
 			if (finger) {
 				finger--;
 			} else {
-				index--; /* Move to the next lower byte */
+				temp--; /* Move to the next lower byte */
 				finger = 7;
 			}
 
@@ -1051,6 +1055,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 		synaptics_rmi4_free_fingers(rmi4_data);
 		return 0;
 	}
+#endif
 
 	retval = synaptics_rmi4_i2c_read(rmi4_data,
 			data_addr + extra_data->data1_offset,
