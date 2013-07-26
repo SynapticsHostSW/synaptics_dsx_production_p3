@@ -201,6 +201,7 @@ struct synaptics_rmi4_device_info {
 struct synaptics_rmi4_data {
 	struct i2c_client *i2c_client;
 	struct input_dev *input_dev;
+	struct input_dev *pen_dev;
 	const struct synaptics_dsx_platform_data *board;
 	struct synaptics_rmi4_device_info rmi4_mod_info;
 	struct regulator *regulator;

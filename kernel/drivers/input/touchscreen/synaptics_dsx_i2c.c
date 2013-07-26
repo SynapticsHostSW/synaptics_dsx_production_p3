@@ -33,6 +33,7 @@
 
 #define DRIVER_NAME "synaptics_dsx_i2c"
 #define INPUT_PHYS_NAME "synaptics_dsx_i2c/input0"
+#define PEN_PHYS_NAME "synaptics_dsx_i2c/input1"
 
 #ifdef KERNEL_ABOVE_2_6_38
 #define TYPE_B_PROTOCOL
@@ -46,7 +47,6 @@
 
 #define ACTIVE_PEN_MAX_PRESSURE_16BIT 65535
 #define ACTIVE_PEN_MAX_PRESSURE_8BIT 255
-#define DEFAULT_FINGER_PRESSURE 1
 
 /*
 #define IGNORE_FN_INIT_FAILURE
@@ -750,21 +750,15 @@ static int synaptics_rmi4_pen_report(struct synaptics_rmi4_data *rmi4_data,
 	if (pen_data->status_pen == 0) {
 		if (pen_active) {
 			pen_active = false;
-#ifdef TYPE_B_PROTOCOL
-			input_mt_slot(rmi4_data->input_dev, 0);
-			input_mt_report_slot_state(rmi4_data->input_dev,
-					MT_TOOL_PEN, 0);
-#endif
-			input_report_key(rmi4_data->input_dev,
+
+			input_report_key(rmi4_data->pen_dev,
 					BTN_TOUCH, 0);
-			input_report_key(rmi4_data->input_dev,
+			input_report_key(rmi4_data->pen_dev,
 					BTN_TOOL_PEN, 0);
-			input_report_key(rmi4_data->input_dev,
+			input_report_key(rmi4_data->pen_dev,
 					BTN_TOOL_RUBBER, 0);
-#ifndef TYPE_B_PROTOCOL
-			input_mt_sync(rmi4_data->input_dev);
-#endif
-			input_sync(rmi4_data->input_dev);
+
+			input_sync(rmi4_data->pen_dev);
 		}
 
 		dev_dbg(&rmi4_data->i2c_client->dev,
@@ -789,12 +783,6 @@ static int synaptics_rmi4_pen_report(struct synaptics_rmi4_data *rmi4_data,
 
 	pen_active = true;
 
-#ifdef TYPE_B_PROTOCOL
-	input_mt_slot(rmi4_data->input_dev, 0);
-	input_mt_report_slot_state(rmi4_data->input_dev,
-			MT_TOOL_PEN, 1);
-#endif
-
 	if (rmi4_data->pen_max_pressure == ACTIVE_PEN_MAX_PRESSURE_16BIT) {
 		pressure = (pen_data->pressure_msb << 8) |
 				pen_data->pressure_lsb;
@@ -802,28 +790,24 @@ static int synaptics_rmi4_pen_report(struct synaptics_rmi4_data *rmi4_data,
 		pressure = pen_data->pressure_lsb;
 	}
 
-	input_report_key(rmi4_data->input_dev,
+	input_report_key(rmi4_data->pen_dev,
 			BTN_TOUCH, pressure > 0 ? 1 : 0);
 
-	input_report_key(rmi4_data->input_dev,
+	input_report_key(rmi4_data->pen_dev,
 			pen_data->status_invert > 0 ?
 			BTN_TOOL_RUBBER : BTN_TOOL_PEN, 1);
 
-	input_report_abs(rmi4_data->input_dev,
-			ABS_MT_POSITION_X, x);
-	input_report_abs(rmi4_data->input_dev,
-			ABS_MT_POSITION_Y, y);
-	input_report_abs(rmi4_data->input_dev,
-			ABS_MT_PRESSURE, pressure);
+	input_report_abs(rmi4_data->pen_dev,
+			ABS_X, x);
+	input_report_abs(rmi4_data->pen_dev,
+			ABS_Y, y);
+	input_report_abs(rmi4_data->pen_dev,
+			ABS_PRESSURE, pressure);
 
-	input_report_key(rmi4_data->input_dev,
+	input_report_key(rmi4_data->pen_dev,
 			BTN_STYLUS, pen_data->status_barrel > 0 ? 1 : 0);
 
-#ifndef TYPE_B_PROTOCOL
-	input_mt_sync(rmi4_data->input_dev);
-#endif
-
-	input_sync(rmi4_data->input_dev);
+	input_sync(rmi4_data->pen_dev);
 
 	dev_dbg(&rmi4_data->i2c_client->dev,
 			"%s: Active pen:\n"
@@ -1130,11 +1114,6 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 			input_report_abs(rmi4_data->input_dev,
 					ABS_MT_TOUCH_MINOR, min(wx, wy));
 #endif
-			if (rmi4_data->active_pen) {
-				input_report_abs(rmi4_data->input_dev,
-						ABS_MT_PRESSURE,
-						DEFAULT_FINGER_PRESSURE);
-			}
 #ifndef TYPE_B_PROTOCOL
 			input_mt_sync(rmi4_data->input_dev);
 #endif
@@ -2430,16 +2409,22 @@ static void synaptics_rmi4_set_params(struct synaptics_rmi4_data *rmi4_data)
 			ABS_MT_TOUCH_MINOR, 0,
 			rmi4_data->max_touch_width, 0, 0);
 #endif
-	if (rmi4_data->active_pen) {
-		input_set_abs_params(rmi4_data->input_dev,
-				ABS_MT_PRESSURE, 0,
-				rmi4_data->pen_max_pressure, 0, 0);
-	}
-
 #ifdef TYPE_B_PROTOCOL
 	input_mt_init_slots(rmi4_data->input_dev,
 			rmi4_data->num_of_fingers);
 #endif
+
+	if (rmi4_data->active_pen) {
+		input_set_abs_params(rmi4_data->pen_dev,
+				ABS_X, 0,
+				rmi4_data->sensor_max_x, 0, 0);
+		input_set_abs_params(rmi4_data->pen_dev,
+				ABS_Y, 0,
+				rmi4_data->sensor_max_y, 0, 0);
+		input_set_abs_params(rmi4_data->pen_dev,
+				ABS_PRESSURE, 0,
+				rmi4_data->pen_max_pressure, 0, 0);
+	}
 
 	f1a = NULL;
 	if (!list_empty(&rmi->support_fn_list)) {
@@ -2496,14 +2481,38 @@ static int synaptics_rmi4_set_input_dev(struct synaptics_rmi4_data *rmi4_data)
 	set_bit(EV_ABS, rmi4_data->input_dev->evbit);
 	set_bit(BTN_TOUCH, rmi4_data->input_dev->keybit);
 	set_bit(BTN_TOOL_FINGER, rmi4_data->input_dev->keybit);
-	if (rmi4_data->active_pen) {
-		set_bit(BTN_TOOL_PEN, rmi4_data->input_dev->keybit);
-		set_bit(BTN_TOOL_RUBBER, rmi4_data->input_dev->keybit);
-		set_bit(BTN_STYLUS, rmi4_data->input_dev->keybit);
-	}
 #ifdef INPUT_PROP_DIRECT
 	set_bit(INPUT_PROP_DIRECT, rmi4_data->input_dev->propbit);
 #endif
+
+	if (rmi4_data->active_pen) {
+		rmi4_data->pen_dev = input_allocate_device();
+		if (rmi4_data->pen_dev == NULL) {
+			dev_err(&rmi4_data->i2c_client->dev,
+					"%s: Failed to allocate pen device\n",
+					__func__);
+			retval = -ENOMEM;
+			goto err_pen_device;
+		}
+
+		rmi4_data->pen_dev->name = DRIVER_NAME;
+		rmi4_data->pen_dev->phys = PEN_PHYS_NAME;
+		rmi4_data->pen_dev->id.product = SYNAPTICS_DSX_DRIVER_PRODUCT;
+		rmi4_data->pen_dev->id.version = SYNAPTICS_DSX_DRIVER_VERSION;
+		rmi4_data->pen_dev->id.bustype = BUS_I2C;
+		rmi4_data->pen_dev->dev.parent = &rmi4_data->i2c_client->dev;
+		input_set_drvdata(rmi4_data->pen_dev, rmi4_data);
+
+		set_bit(EV_KEY, rmi4_data->pen_dev->evbit);
+		set_bit(EV_ABS, rmi4_data->pen_dev->evbit);
+		set_bit(BTN_TOUCH, rmi4_data->pen_dev->keybit);
+		set_bit(BTN_TOOL_PEN, rmi4_data->pen_dev->keybit);
+		set_bit(BTN_TOOL_RUBBER, rmi4_data->pen_dev->keybit);
+		set_bit(BTN_STYLUS, rmi4_data->pen_dev->keybit);
+#ifdef INPUT_PROP_DIRECT
+		set_bit(INPUT_PROP_DIRECT, rmi4_data->pen_dev->propbit);
+#endif
+	}
 
 	if (rmi4_data->board->swap_axes) {
 		temp = rmi4_data->sensor_max_x;
@@ -2521,13 +2530,28 @@ static int synaptics_rmi4_set_input_dev(struct synaptics_rmi4_data *rmi4_data)
 		goto err_register_input;
 	}
 
+	if (rmi4_data->active_pen) {
+		retval = input_register_device(rmi4_data->pen_dev);
+		if (retval) {
+			dev_err(&rmi4_data->i2c_client->dev,
+					"%s: Failed to register pen device\n",
+					__func__);
+			goto err_register_pen;
+		}
+	}
+
 	return 0;
 
-err_register_input:
-	input_free_device(rmi4_data->input_dev);
+err_register_pen:
+	input_unregister_device(rmi4_data->input_dev);
 
+err_register_input:
+	input_free_device(rmi4_data->pen_dev);
+
+err_pen_device:
 err_query_device:
 	synaptics_rmi4_empty_fn_list(rmi4_data);
+	input_free_device(rmi4_data->input_dev);
 
 err_input_device:
 	return retval;
@@ -2952,7 +2976,9 @@ err_gpio_attn:
 	unregister_early_suspend(&rmi4_data->early_suspend);
 #endif
 	input_unregister_device(rmi4_data->input_dev);
+	input_unregister_device(rmi4_data->pen_dev);
 	rmi4_data->input_dev = NULL;
+	rmi4_data->pen_dev = NULL;
 
 err_set_input_dev:
 	if (platform_data->regulator_en) {
@@ -3012,6 +3038,7 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 	unregister_early_suspend(&rmi4_data->early_suspend);
 #endif
 	input_unregister_device(rmi4_data->input_dev);
+	input_unregister_device(rmi4_data->pen_dev);
 
 	if (platform_data->regulator_en) {
 		regulator_disable(rmi4_data->regulator);
