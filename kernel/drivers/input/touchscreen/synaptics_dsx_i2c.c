@@ -1484,7 +1484,8 @@ static int synaptics_rmi4_pen_pressure(struct synaptics_rmi4_data *rmi4_data,
 	}
 
 	data_desc++; /* Jump over the size entry */
-	if (*data_desc & (1 << 1)) /* Check for the presence of subpacket 1 */
+	/* Check for the presence of subpackets 1 and 2 */
+	if ((*data_desc & (3 << 1)) == (3 << 1))
 		rmi4_data->pen_max_pressure = ACTIVE_PEN_MAX_PRESSURE_16BIT;
 	else
 		rmi4_data->pen_max_pressure = ACTIVE_PEN_MAX_PRESSURE_8BIT;
