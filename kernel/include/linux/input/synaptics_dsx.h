@@ -21,13 +21,24 @@
 #define _SYNAPTICS_DSX_H_
 
 /*
- * synaptics_dsx_cap_button_map - 0d button map
+ * struct synaptics_dsx_cap_button_map - 0d button map
  * @nbuttons: number of 0d buttons
  * @map: pointer to array of button types
  */
 struct synaptics_dsx_cap_button_map {
 	unsigned char nbuttons;
 	unsigned char *map;
+};
+
+/*
+ * struct synaptics_dsx_spi_delay - spi bus timimg parameters
+ * @byte_delay: delay time betwwen two bytes of data
+ * @block_delay: delay time between two spi_transfers	  	
+*/
+
+struct synaptics_dsx_spi_delay {
+	unsigned char byte_delay;
+	unsigned char block_delay; 
 };
 
 /*
@@ -56,6 +67,7 @@ struct synaptics_dsx_platform_data {
 	unsigned int reset_delay_ms;
 	int (*gpio_config)(int gpio, bool configure);
 	struct synaptics_dsx_cap_button_map *cap_button_map;
+	struct synaptics_dsx_spi_delay *spi_delay;
 };
 
 #endif

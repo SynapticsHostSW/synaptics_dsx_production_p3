@@ -1,0 +1,64 @@
+#
+# Synaptics touchscreen modules configuration
+#
+menuconfig TOUCHSCREEN_SYNAPTICS_DSX
+	bool "Synaptics DSX modules"
+	default Y
+	help
+	  Say Y here, and a list of Synaptics touchscreen modules will be displayed.
+	  This option doesn't affect the kernel.
+
+	  If unsure, say N.
+
+if TOUCHSCREEN_SYNAPTICS_DSX
+
+config TOUCHSCREEN_SYNAPTICS_DSX_I2C
+	bool "Synaptics DSX touchscreen I2C bus support"
+	depends on I2C
+	default Y
+	help
+	  This enables support for i2c bus support for Synaptics DSX
+	  touchscreens.
+
+config TOUCHSCREEN_SYNAPTICS_DSX_SPI
+	bool "Synaptics DSX touchscreen SPI bus support"
+	depends on SPI_MASTER
+	default N
+	help
+	  This enables support for spi bus support for Synaptics DSX
+	  touchscreens.
+
+config TOUCHSCREEN_SYNAPTICS_DSX_CORE
+	tristate "Synaptics DSX core driver"
+	depends on TOUCHSCREEN_SYNAPTICS_DSX_I2C || TOUCHSCREEN_SYNAPTICS_DSX_SPI
+	help
+	  Say Y here if you have a Synaptics DSX touchscreen
+	  connected to your system.
+	
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called synaptics_dsx_core.
+
+config TOUCHSCREEN_SYNAPTICS_DSX_RMI_DEV
+	tristate "Synaptics DSX touchscreen char device"
+	depends on TOUCHSCREEN_SYNAPTICS_DSX_CORE
+	help
+	  This enables support for direct register access for Synaptics DSX
+	  touchscreens.
+
+config TOUCHSCREEN_SYNAPTICS_DSX_TEST_REPORTING
+	tristate "Synaptics DSX touchscreen test reporting"
+	depends on TOUCHSCREEN_SYNAPTICS_DSX_CORE
+	help
+	  This enables support for test reporting for Synaptics DSX
+	  touchscreens.
+
+config TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE
+	tristate "Synaptics DSX touchscreen firmware update"
+	depends on TOUCHSCREEN_SYNAPTICS_DSX_CORE
+	help
+	  This enables support for firmware update for Synaptics DSX
+	  touchscreens.
+
+endif # TOUCHSCREEN_SYNAPTICS_DSX

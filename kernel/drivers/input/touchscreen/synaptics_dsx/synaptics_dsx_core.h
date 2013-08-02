@@ -19,6 +19,8 @@
 #ifndef _SYNAPTICS_DSX_RMI4_H_
 #define _SYNAPTICS_DSX_RMI4_H_
 
+#define DRIVER_NAME "synaptics_dsx_core"
+
 #define SYNAPTICS_DS4 (1 << 0)
 #define SYNAPTICS_DS5 (1 << 1)
 #define SYNAPTICS_DSX_DRIVER_PRODUCT (SYNAPTICS_DS4 | SYNAPTICS_DS5)
@@ -28,6 +30,7 @@
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 #endif
+#include <linux/platform_device.h>
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 38))
 #define KERNEL_ABOVE_2_6_38
@@ -168,11 +171,26 @@ struct synaptics_rmi4_device_info {
 	struct list_head support_fn_list;
 };
 
+struct synaptics_rmi4_data;
+
+struct synaptics_dsx_bus_data {
+	u16 type;
+	int (*read)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
+		unsigned char *data, unsigned short length);
+	int (*write)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
+		unsigned char *data, unsigned short length);
+};
+
+struct synaptics_dsx_hw_info {
+	const struct synaptics_dsx_platform_data *board;
+	const struct synaptics_dsx_bus_data *bus;
+};
+
 /*
  * struct synaptics_rmi4_data - rmi4 device instance data
- * @i2c_client: pointer to associated i2c client
+ * @pdev: pointer to platform_device
  * @input_dev: pointer to associated input device
- * @board: constant pointer to platform data
+ * @hw_info: constant pointer to hw_info data structure
  * @rmi4_mod_info: device information
  * @regulator: pointer to associated regulator
  * @rmi4_io_ctrl_mutex: mutex for i2c i/o control
@@ -192,14 +210,12 @@ struct synaptics_rmi4_device_info {
  * @fingers_on_2d: flag to indicate presence of fingers in 2d area
  * @sensor_sleep: flag to indicate sleep state of sensor
  * @wait: wait queue for touch data polling in interrupt thread
- * @i2c_read: pointer to i2c read function
- * @i2c_write: pointer to i2c write function
  * @irq_enable: pointer to irq enable function
  */
 struct synaptics_rmi4_data {
-	struct i2c_client *i2c_client;
+	struct platform_device *pdev;
 	struct input_dev *input_dev;
-	const struct synaptics_dsx_platform_data *board;
+	const struct synaptics_dsx_hw_info *hw_info;
 	struct synaptics_rmi4_device_info rmi4_mod_info;
 	struct regulator *regulator;
 	struct mutex rmi4_reset_mutex;
@@ -234,10 +250,6 @@ struct synaptics_rmi4_data {
 	bool sensor_sleep;
 	bool stay_awake;
 	bool staying_awake;
-	int (*i2c_read)(struct synaptics_rmi4_data *pdata, unsigned short addr,
-			unsigned char *data, unsigned short length);
-	int (*i2c_write)(struct synaptics_rmi4_data *pdata, unsigned short addr,
-			unsigned char *data, unsigned short length);
 	int (*irq_enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
 	int (*reset_device)(struct synaptics_rmi4_data *rmi4_data,
 			unsigned short f01_cmd_base_addr);
@@ -265,6 +277,9 @@ void synaptics_rmi4_new_function(enum exp_fn fn_type, bool insert,
 				unsigned char intr_mask));
 
 int synaptics_fw_updater(unsigned char *fw_data);
+
+int synaptics_rmi4_bus_init(void);
+void synaptics_rmi4_bus_exit(void);
 
 static inline ssize_t synaptics_rmi4_show_error(struct device *dev,
 		struct device_attribute *attr, char *buf)
