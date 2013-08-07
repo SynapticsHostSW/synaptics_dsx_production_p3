@@ -69,11 +69,11 @@
 #include <linux/spi/spi.h>
 #include <linux/input/synaptics_dsx.h>
 
-#define TM1940 (1)	// I2C interface
-#define TM2448 (2)	// I2C interface
-#define TM2704 (3)	// SPI interface
+#define TM1940 (1)	/* I2C interface */
+#define TM2448 (2)	/* I2C interface */
+#define TM2074 (3)	/* SPI interface */
 
-#define SYNAPTICS_MODULE TM2448
+#define SYNAPTICS_MODULE TM2074
 
 #define PANDA_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
 #define PANDA_RAMCONSOLE_SIZE	SZ_2M
@@ -119,14 +119,14 @@ static struct synaptics_dsx_platform_data dsx_platformdata = {
 	.irq_gpio = DSX_ATTN_GPIO,
 	.reset_delay_ms = 100,
 	.reset_gpio = DSX_RESET_GPIO,
- 	.gpio_config = synaptics_gpio_setup,
- 	.cap_button_map = &tm2448_cap_button_map,
+	.gpio_config = synaptics_gpio_setup,
+	.cap_button_map = &tm2448_cap_button_map,
 };
 
 static struct i2c_board_info bus4_i2c_devices[] = {
 	{
-		I2C_BOARD_INFO("synaptics_dsx_i2c", DSX_I2C_ADDR),
-		.platform_data = &dsx_platformdata,
+	I2C_BOARD_INFO("synaptics_dsx_i2c", DSX_I2C_ADDR),
+	.platform_data = &dsx_platformdata,
 	},
 };
 
@@ -138,7 +138,7 @@ static struct spi_board_info rmi4_spi_devices[] = {};
 #define DSX_ATTN_MUX_NAME "gpmc_ad15.gpio_39"
 #define DSX_RESET_GPIO -1
 
-static unsigned char tm1940_cap_button_codes[] = {KEY_MENU, KEY_HOME, KEY_BACK, KEY_SEARCH};
+static unsigned char tm1940_cap_button_codes[] = { KEY_MENU, KEY_HOME, KEY_BACK, KEY_SEARCH };
 
 static struct synaptics_dsx_cap_button_map tm1940_cap_button_map = {
 	.nbuttons = ARRAY_SIZE(tm1940_cap_button_codes),
@@ -163,7 +163,7 @@ static struct i2c_board_info bus4_i2c_devices[] = {
 
 static struct spi_board_info rmi4_spi_devices[] = {};
 
-#else 	//TM2704 SPI interface module
+#else	/* TM2074 SPI interface module */
 #define DSX_ATTN_GPIO 39
 #define DSX_ATTN_MUX_NAME "gpmc_ad15.gpio_39"
 #define DSX_RESET_GPIO -1
@@ -171,16 +171,16 @@ static struct spi_board_info rmi4_spi_devices[] = {};
 #define SYNAPTICS_SPI_CS 0
 #define SPI_BYTE_DELAY 20
 #define SPI_BLOCK_DELAY 20
-#define SPI_MAX_SPEED (2*1000*1000)
+#define SPI_MAX_SPEED (8*1000*1000)
 
-static unsigned char tm2704_cap_button_codes[] = {};
+static unsigned char tm2074_cap_button_codes[] = {};
 
-static struct synaptics_dsx_cap_button_map tm2704_cap_button_map = {
-	.nbuttons = ARRAY_SIZE(tm2704_cap_button_codes),
-	.map = tm2704_cap_button_codes,
+static struct synaptics_dsx_cap_button_map tm2074_cap_button_map = {
+	.nbuttons = ARRAY_SIZE(tm2074_cap_button_codes),
+	.map = tm2074_cap_button_codes,
 };
 
-struct synaptics_dsx_spi_delay tm2704_spi_delay = {
+struct synaptics_dsx_spi_delay tm2074_spi_delay = {
 	.byte_delay = SPI_BYTE_DELAY,
 	.block_delay = SPI_BLOCK_DELAY,
 };
@@ -190,9 +190,9 @@ static struct synaptics_dsx_platform_data dsx_platformdata = {
 	.irq_gpio = DSX_ATTN_GPIO,
 	.reset_delay_ms = 100,
 	.reset_gpio = DSX_RESET_GPIO,
- 	.gpio_config = synaptics_gpio_setup,
- 	.cap_button_map = &tm2704_cap_button_map,
-	.spi_delay = &tm2704_spi_delay,
+	.gpio_config = synaptics_gpio_setup,
+	.cap_button_map = &tm2074_cap_button_map,
+	.spi_delay = &tm2074_spi_delay,
 };
 
 static struct spi_board_info rmi4_spi_devices[] = {
@@ -688,14 +688,15 @@ static int __init omap4_panda_i2c_init(void)
 	 */
 	omap_register_i2c_bus(3, 100, panda_i2c_eeprom,
 					ARRAY_SIZE(panda_i2c_eeprom));
-	if(ARRAY_SIZE(bus4_i2c_devices)) {
+	if (ARRAY_SIZE(bus4_i2c_devices)) {
 #ifdef DSX_ATTN_MUX_NAME
 		omap_mux_init_signal(DSX_ATTN_MUX_NAME, OMAP_PIN_INPUT_PULLUP);
 #endif
 #ifdef DSX_RESET_MUX_NAME
 		omap_mux_init_signal(DSX_RESET_MUX_NAME, OMAP_PIN_OUTPUT);
 #endif
-		omap_register_i2c_bus(4, 400, bus4_i2c_devices, ARRAY_SIZE(bus4_i2c_devices));
+		omap_register_i2c_bus(4, 400, bus4_i2c_devices,
+						ARRAY_SIZE(bus4_i2c_devices));
 	} else {
 		omap_register_i2c_bus(4, 400, NULL, 0);
 	}
@@ -705,18 +706,20 @@ static int __init omap4_panda_i2c_init(void)
 
 static void __init omap4_panda_spi_init(void)
 {
-	if(ARRAY_SIZE(rmi4_spi_devices)) {
+	if (ARRAY_SIZE(rmi4_spi_devices)) {
 #ifdef DSX_ATTN_MUX_NAME
 		omap_mux_init_signal(DSX_ATTN_MUX_NAME, OMAP_PIN_INPUT_PULLUP);
 #endif
 #ifdef DSX_RESET_MUX_NAME
 		omap_mux_init_signal(DSX_RESET_MUX_NAME, OMAP_PIN_OUTPUT);
 #endif
-		omap_mux_init_signal("mcspi1_cs0", OMAP_PIN_OUTPUT);  //sub mcspi1_cs1 fpr cd1 etc.
+		omap_mux_init_signal("mcspi1_cs0", OMAP_PIN_OUTPUT);
+		/* sub mcspi1_cs1 fpr cd1 etc. */
 		omap_mux_init_signal("mcspi1_clk", OMAP_PIN_INPUT);
 		omap_mux_init_signal("mcspi1_somi", OMAP_PIN_INPUT_PULLUP);
 		omap_mux_init_signal("mcspi1_simo", OMAP_PIN_OUTPUT);
-		spi_register_board_info(rmi4_spi_devices, ARRAY_SIZE(rmi4_spi_devices));
+		spi_register_board_info(rmi4_spi_devices,
+					ARRAY_SIZE(rmi4_spi_devices));
 	}
 }
 
@@ -887,7 +890,7 @@ static void omap4_panda_hdmi_mux_init(void)
 	status = gpio_request_array(panda_hdmi_gpios,
 			ARRAY_SIZE(panda_hdmi_gpios));
 	if (status)
-		pr_err("%s: Cannot request HDMI GPIOs %x \n", __func__, status);
+		pr_err("%s: Cannot request HDMI GPIOs %x\n", __func__, status);
 }
 
 static struct omap_dss_device  omap4_panda_hdmi_device = {

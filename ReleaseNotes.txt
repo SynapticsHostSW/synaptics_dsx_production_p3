@@ -2,6 +2,15 @@
 //  Synaptics DSX I2C Driver
 ///////////////////////////////////////////////////////////
 
+v1.18.2 Aug 07, 2013
+   - Fix issue HST-37175: firmware update stucks when read config area
+
+v1.18.1 Aug 01, 2013
+   - Add synaptics_dsx_i2c.c and synaptics_dsx_spi.c as bus abstraction layer.
+   - Move all synaptics related files to new folder under /kernel/drivers/input/touchscreen/synaptics_dsx/
+   - Introduce platform driver and platform device to synaptics_dsx_core.c
+   - Fix OMAP SPI kernel issue while enable CONFIG_SPI_OMAP24XX=y in panda_defconfig
+
 v1.18 Jul 16, 2013 scott.lin@tw.synaptics.com
    - Use list_for_each_entry_safe when deleting entries in linked lists.
 
