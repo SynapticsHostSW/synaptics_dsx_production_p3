@@ -2366,8 +2366,8 @@ static int synaptics_rmi4_f54_set_sysfs(void)
 			&rmi4_data->input_dev->dev.kobj);
 	if (!f54->attr_dir) {
 		dev_err(&rmi4_data->i2c_client->dev,
-			"%s: Failed to create sysfs directory\n",
-			__func__);
+				"%s: Failed to create sysfs directory\n",
+				__func__);
 		goto exit_1;
 	}
 
