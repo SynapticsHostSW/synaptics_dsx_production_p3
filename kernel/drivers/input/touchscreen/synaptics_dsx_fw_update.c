@@ -270,7 +270,6 @@ struct synaptics_rmi4_fwu_handle {
 	const unsigned char *lockdown_data;
 	struct workqueue_struct *fwu_workqueue;
 	struct delayed_work fwu_work;
-	struct synaptics_rmi4_fn_desc f01_fd;
 	struct synaptics_rmi4_fn_desc f34_fd;
 	struct synaptics_rmi4_exp_fn_ptr *fn_ptr;
 	struct synaptics_rmi4_data *rmi4_data;
@@ -372,9 +371,10 @@ static void parse_header(struct image_header_data *header,
 static int fwu_read_f01_device_status(struct f01_device_status *status)
 {
 	int retval;
+	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
 	retval = fwu->fn_ptr->read(fwu->rmi4_data,
-			fwu->f01_fd.data_base_addr,
+			rmi4_data->f01_data_base_addr,
 			status->data,
 			sizeof(status->data));
 	if (retval < 0) {
@@ -734,6 +734,7 @@ static int fwu_scan_pdt(void)
 	bool f01found = false;
 	bool f34found = false;
 	struct synaptics_rmi4_fn_desc rmi_fd;
+	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
 	for (addr = PDT_START; addr > PDT_END; addr -= PDT_ENTRY_SIZE) {
 		retval = fwu->fn_ptr->read(fwu->rmi4_data,
@@ -750,13 +751,14 @@ static int fwu_scan_pdt(void)
 			switch (rmi_fd.fn_number) {
 			case SYNAPTICS_RMI4_F01:
 				f01found = true;
-				fwu->f01_fd.query_base_addr =
+
+				rmi4_data->f01_query_base_addr =
 						rmi_fd.query_base_addr;
-				fwu->f01_fd.ctrl_base_addr =
+				rmi4_data->f01_ctrl_base_addr =
 						rmi_fd.ctrl_base_addr;
-				fwu->f01_fd.data_base_addr =
+				rmi4_data->f01_data_base_addr =
 						rmi_fd.data_base_addr;
-				fwu->f01_fd.cmd_base_addr =
+				rmi4_data->f01_cmd_base_addr =
 						rmi_fd.cmd_base_addr;
 				break;
 			case SYNAPTICS_RMI4_F34:
@@ -891,6 +893,7 @@ static int fwu_enter_flash_prog(void)
 	int retval;
 	struct f01_device_status f01_device_status;
 	struct f01_device_control f01_device_control;
+	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
 	retval = fwu_write_bootloader_id();
 	if (retval < 0)
@@ -931,7 +934,7 @@ static int fwu_enter_flash_prog(void)
 		return retval;
 
 	retval = fwu->fn_ptr->read(fwu->rmi4_data,
-			fwu->f01_fd.ctrl_base_addr,
+			rmi4_data->f01_ctrl_base_addr,
 			f01_device_control.data,
 			sizeof(f01_device_control.data));
 	if (retval < 0) {
@@ -945,7 +948,7 @@ static int fwu_enter_flash_prog(void)
 	f01_device_control.sleep_mode = SLEEP_MODE_NORMAL;
 
 	retval = fwu->fn_ptr->write(fwu->rmi4_data,
-			fwu->f01_fd.ctrl_base_addr,
+			rmi4_data->f01_ctrl_base_addr,
 			f01_device_control.data,
 			sizeof(f01_device_control.data));
 	if (retval < 0) {
@@ -1078,10 +1081,7 @@ static int fwu_start_write_config(void)
 {
 	int retval;
 	unsigned short block_count;
-	unsigned short f01_cmd_base_addr;
 	struct image_header_data header;
-
-	f01_cmd_base_addr = fwu->f01_fd.cmd_base_addr;
 
 	switch (fwu->config_area) {
 	case UI_CONFIG_AREA:
@@ -1136,7 +1136,7 @@ static int fwu_start_write_config(void)
 				__func__);
 	}
 
-	fwu->rmi4_data->reset_device(fwu->rmi4_data, f01_cmd_base_addr);
+	fwu->rmi4_data->reset_device(fwu->rmi4_data);
 
 	pr_notice("%s: End of write config process\n", __func__);
 
@@ -1150,9 +1150,6 @@ static int fwu_do_read_config(void)
 	unsigned short block_num;
 	unsigned short block_count;
 	unsigned short index = 0;
-	unsigned short f01_cmd_base_addr;
-
-	f01_cmd_base_addr = fwu->f01_fd.cmd_base_addr;
 
 	retval = fwu_enter_flash_prog();
 	if (retval < 0)
@@ -1242,7 +1239,7 @@ static int fwu_do_read_config(void)
 	}
 
 exit:
-	fwu->rmi4_data->reset_device(fwu->rmi4_data, f01_cmd_base_addr);
+	fwu->rmi4_data->reset_device(fwu->rmi4_data);
 
 	return retval;
 }
@@ -1286,13 +1283,10 @@ static int fwu_start_reflash(void)
 {
 	int retval = 0;
 	enum flash_area flash_area;
-	unsigned short f01_cmd_base_addr;
 	struct image_header_data header;
 	struct f01_device_status f01_device_status;
 	const unsigned char *fw_image;
 	const struct firmware *fw_entry = NULL;
-
-	f01_cmd_base_addr = fwu->f01_fd.cmd_base_addr;
 
 	if (fwu->rmi4_data->sensor_sleep) {
 		dev_err(&fwu->rmi4_data->i2c_client->dev,
@@ -1397,7 +1391,7 @@ static int fwu_start_reflash(void)
 	}
 
 exit:
-	fwu->rmi4_data->reset_device(fwu->rmi4_data, f01_cmd_base_addr);
+	fwu->rmi4_data->reset_device(fwu->rmi4_data);
 
 	if (fw_entry)
 		release_firmware(fw_entry);

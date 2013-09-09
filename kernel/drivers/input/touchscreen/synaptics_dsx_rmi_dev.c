@@ -230,7 +230,7 @@ static ssize_t rmidev_sysfs_open_store(struct device *dev,
 	rmidev->fn_ptr->enable(rmi4_data, false);
 	rmidev_sysfs_irq_enable(rmi4_data, true);
 
-	dev_dbg(&rmidev->rmi4_data->i2c_client->dev,
+	dev_dbg(&rmi4_data->i2c_client->dev,
 			"%s: Attention interrupt disabled\n",
 			__func__);
 
@@ -241,10 +241,7 @@ static ssize_t rmidev_sysfs_release_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
 	unsigned int input;
-	unsigned short f01_cmd_base_addr;
 	struct synaptics_rmi4_data *rmi4_data = rmidev->rmi4_data;
-
-	f01_cmd_base_addr = rmi4_data->f01_cmd_base_addr;
 
 	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
@@ -252,12 +249,12 @@ static ssize_t rmidev_sysfs_release_store(struct device *dev,
 	if (input != 1)
 		return -EINVAL;
 
-	rmi4_data->reset_device(rmi4_data, f01_cmd_base_addr);
+	rmi4_data->reset_device(rmi4_data);
 
 	rmidev_sysfs_irq_enable(rmi4_data, false);
 	rmidev->fn_ptr->enable(rmi4_data, true);
 
-	dev_dbg(&rmidev->rmi4_data->i2c_client->dev,
+	dev_dbg(&rmi4_data->i2c_client->dev,
 			"%s: Attention interrupt enabled\n",
 			__func__);
 
@@ -462,17 +459,14 @@ static int rmidev_open(struct inode *inp, struct file *filp)
  */
 static int rmidev_release(struct inode *inp, struct file *filp)
 {
-	unsigned short f01_cmd_base_addr;
 	struct synaptics_rmi4_data *rmi4_data = rmidev->rmi4_data;
 	struct rmidev_data *dev_data =
 			container_of(inp->i_cdev, struct rmidev_data, main_dev);
 
-	f01_cmd_base_addr = rmi4_data->f01_cmd_base_addr;
-
 	if (!dev_data)
 		return -EACCES;
 
-	rmi4_data->reset_device(rmi4_data, f01_cmd_base_addr);
+	rmi4_data->reset_device(rmi4_data);
 
 	mutex_lock(&(dev_data->file_mutex));
 
@@ -480,8 +474,8 @@ static int rmidev_release(struct inode *inp, struct file *filp)
 	if (dev_data->ref_count < 0)
 		dev_data->ref_count = 0;
 
-	rmidev->fn_ptr->enable(rmidev->rmi4_data, true);
-	dev_dbg(&rmidev->rmi4_data->i2c_client->dev,
+	rmidev->fn_ptr->enable(rmi4_data, true);
+	dev_dbg(&rmi4_data->i2c_client->dev,
 			"%s: Attention interrupt enabled\n",
 			__func__);
 
